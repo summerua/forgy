@@ -12,13 +12,16 @@ use indicatif::{ProgressBar, ProgressStyle};
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use prometheus::{
-    push_metrics, Gauge, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts,
-    Registry,
+    Gauge, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts, Registry,
 };
 use reqwest::{Client, Method};
 use serde::{Deserialize, Serialize};
 // sysinfo import removed - no longer tracking system-wide network stats
 use tokio::time::{interval, sleep};
+
+// Remote write module
+mod remote_write;
+use remote_write::RemoteWriteClient;
 
 // =============================================================================
 // PROMETHEUS METRICS
@@ -29,54 +32,54 @@ lazy_static! {
 
     // Request metrics
     static ref REQUEST_COUNTER: IntCounterVec = IntCounterVec::new(
-        Opts::new("bh_requests_total", "Total number of requests made"),
+        Opts::new("forgy_requests_total", "Total number of requests made"),
         &["status", "method"]
     ).unwrap();
 
     static ref REQUEST_DURATION: HistogramVec = HistogramVec::new(
-        HistogramOpts::new("bh_request_duration_seconds", "Request duration in seconds")
+        HistogramOpts::new("forgy_request_duration_seconds", "Request duration in seconds")
             .buckets(vec![0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]),
         &["method", "status_class"]
     ).unwrap();
 
     static ref ACTIVE_VUS: IntGauge = IntGauge::new(
-        "bh_active_vus", "Number of active virtual users"
+        "forgy_active_vus", "Number of active virtual users"
     ).unwrap();
 
     static ref TARGET_VUS: IntGauge = IntGauge::new(
-        "bh_target_vus", "Target number of virtual users"
+        "forgy_target_vus", "Target number of virtual users"
     ).unwrap();
 
     static ref SUCCESS_RATE: Gauge = Gauge::new(
-        "bh_success_rate", "Current success rate (percentage)"
+        "forgy_success_rate", "Current success rate (percentage)"
     ).unwrap();
 
     static ref REQUESTS_PER_SECOND: Gauge = Gauge::new(
-        "bh_requests_per_second", "Current requests per second"
+        "forgy_requests_per_second", "Current requests per second"
     ).unwrap();
 
     // Response time percentiles
     static ref RESPONSE_TIME_P50: Gauge = Gauge::new(
-        "bh_response_time_p50_ms", "50th percentile response time in milliseconds"
+        "forgy_response_time_p50_ms", "50th percentile response time in milliseconds"
     ).unwrap();
 
     static ref RESPONSE_TIME_P90: Gauge = Gauge::new(
-        "bh_response_time_p90_ms", "90th percentile response time in milliseconds"
+        "forgy_response_time_p90_ms", "90th percentile response time in milliseconds"
     ).unwrap();
 
     static ref RESPONSE_TIME_P95: Gauge = Gauge::new(
-        "bh_response_time_p95_ms", "95th percentile response time in milliseconds"
+        "forgy_response_time_p95_ms", "95th percentile response time in milliseconds"
     ).unwrap();
 
     static ref RESPONSE_TIME_P99: Gauge = Gauge::new(
-        "bh_response_time_p99_ms", "99th percentile response time in milliseconds"
+        "forgy_response_time_p99_ms", "99th percentile response time in milliseconds"
     ).unwrap();
 
     // Network metrics removed to reduce overhead
 
     // Test phase indicator
     static ref TEST_PHASE: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("bh_phase", "Current test phase (0=idle, 1=rampup, 2=hold, 3=rampdown)"),
+        Opts::new("forgy_phase", "Current test phase (0=idle, 1=rampup, 2=hold, 3=rampdown)"),
         &["phase"]
     ).unwrap();
 }
@@ -133,7 +136,7 @@ struct Args {
     #[clap(long)]
     output: Option<String>,
 
-    /// Prometheus Push Gateway URL (e.g., http://localhost:9091)
+    /// Prometheus Remote Write URL (e.g., http://localhost:9090/api/v1/write)
     #[clap(long, value_name = "URL")]
     prometheus_url: Option<String>,
 
@@ -332,10 +335,10 @@ impl LoadTester {
     }
 
     async fn update_and_push_metrics_periodically(
-        &self, 
+        &self,
         prometheus_url: Option<&str>,
         prometheus_label: &str,
-        frequency_secs: u64
+        frequency_secs: u64,
     ) {
         // Use configurable metrics push frequency
         let mut interval = interval(Duration::from_secs(frequency_secs));
@@ -370,10 +373,10 @@ impl LoadTester {
                 }
             }
 
-            // Push metrics to gateway if URL is provided
+            // Push metrics via Remote Write if URL is provided
             if let Some(url) = prometheus_url {
-                if let Err(e) = push_metrics_to_gateway(url, prometheus_label).await {
-                    eprintln!("Failed to push metrics to Prometheus gateway: {}", e);
+                if let Err(e) = send_metrics_via_remote_write(url, prometheus_label).await {
+                    eprintln!("Failed to send metrics via Remote Write: {}", e);
                 }
             }
         }
@@ -396,7 +399,10 @@ impl LoadTester {
         println!("   Hold: {:?}", hold);
         println!("   Ramp-down: {:?}", ramp_down);
         if prometheus_enabled {
-            println!("   Prometheus Push Gateway: {}", args.prometheus_url.as_ref().unwrap());
+            println!(
+                "   Prometheus Remote Write: {}",
+                args.prometheus_url.as_ref().unwrap()
+            );
             println!("   Prometheus Label: {}", args.prometheus_label);
         }
         println!();
@@ -413,7 +419,11 @@ impl LoadTester {
             let prometheus_label = args.prometheus_label.clone();
             Some(tokio::spawn(async move {
                 tester_clone
-                    .update_and_push_metrics_periodically(prometheus_url.as_deref(), &prometheus_label, frequency)
+                    .update_and_push_metrics_periodically(
+                        prometheus_url.as_deref(),
+                        &prometheus_label,
+                        frequency,
+                    )
                     .await;
             }))
         } else {
@@ -656,26 +666,15 @@ impl Clone for LoadTester {
 }
 
 // =============================================================================
-// PROMETHEUS PUSH FUNCTIONALITY
+// PROMETHEUS REMOTE WRITE FUNCTIONALITY
 // =============================================================================
 
-async fn push_metrics_to_gateway(
-    gateway_url: &str,
-    label: &str,
+async fn send_metrics_via_remote_write(
+    remote_write_url: &str,
+    job_label: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let metric_families = REGISTRY.gather();
-    
-    // Use the label as the job name - no additional grouping labels needed
-    // Arguments: job_name, grouping (HashMap), gateway_url, metric_families, basic_auth
-    push_metrics(
-        label,
-        std::collections::HashMap::new(), // empty grouping labels
-        gateway_url,
-        metric_families,
-        None, // no basic auth
-    )?;
-    
-    Ok(())
+    let client = RemoteWriteClient::new(remote_write_url.to_string());
+    client.send_metrics(&REGISTRY, job_label).await
 }
 
 fn init_prometheus() {
@@ -776,7 +775,7 @@ async fn main() {
     // Initialize Prometheus if URL provided
     if args.prometheus_url.is_some() {
         init_prometheus();
-        println!("Prometheus push mode enabled");
+        println!("Prometheus Remote Write enabled");
     }
 
     // Network monitoring removed - now using HTTP-level estimation
@@ -803,11 +802,12 @@ async fn main() {
 
     // Push final metrics if Prometheus is enabled
     if let Some(prometheus_url) = &args.prometheus_url {
-        println!("\nPushing final metrics to Prometheus gateway...");
-        if let Err(e) = push_metrics_to_gateway(prometheus_url, &args.prometheus_label).await {
+        println!("\nSending final metrics via Remote Write...");
+        if let Err(e) = send_metrics_via_remote_write(prometheus_url, &args.prometheus_label).await
+        {
             eprintln!("Failed to push final metrics: {}", e);
         } else {
-            println!("Final metrics pushed successfully");
+            println!("Final metrics sent successfully");
         }
     }
 }

@@ -54,6 +54,11 @@ hdrhistogram = "7.5"
 # Prometheus metrics
 prometheus = { version = "0.13", features = ["push"] }
 
+# Prometheus remote write
+prost = "0.11"
+prost-types = "0.11"
+snap = "1.1"
+
 # Lazy static for global metrics
 lazy_static = "1.4"
 

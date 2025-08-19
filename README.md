@@ -1,4 +1,4 @@
-# forgy 🔨
+# Forgy 🗜️
 
 **High-performance REST API load testing tool built in Rust with real-time Prometheus metrics**
 
@@ -60,13 +60,13 @@ forgy --help
 # Simple load test with 100 virtual users for 5 minutes
 forgy --url=http://localhost:3000/api --vus=100 --hold=5m
 
-# Advanced test with ramp-up/down and Prometheus Push Gateway
+# Advanced test with ramp-up/down and Prometheus Remote Write
 forgy --url=http://api.example.com/endpoint \
   --vus=1000 \
   --ramp-up=2m \
   --hold=10m \
   --ramp-down=1m \
-  --prometheus-url=http://localhost:9091 \
+  --prometheus-url=http://localhost:9090/api/v1/write \
   --prometheus-label=api-test \
   --metrics-frequency=15
 
@@ -96,7 +96,7 @@ OPTIONS:
     --timeout <SECONDS>              Request timeout in seconds (default: 30)
     --workers <COUNT>                Number of worker threads (default: CPU count)
     --output <FILE>                  Save results to JSON file
-    --prometheus-url <URL>           Prometheus Push Gateway URL (e.g., http://localhost:9091)
+    --prometheus-url <URL>           Prometheus Remote Write URL (e.g., http://localhost:9090/api/v1/write)
     --prometheus-label <LABEL>       Label for grouping metrics in Prometheus (default: forgy)
     --metrics-frequency <SECS>       Metrics push frequency in seconds (default: 10)
     --help                           Print help information
@@ -104,30 +104,25 @@ OPTIONS:
 
 ## Prometheus Integration
 
-forgy supports **push-based metrics** via Prometheus Push Gateway, which is ideal for short-lived load testing jobs.
+forgy supports **Remote Write** to send metrics directly to Prometheus, which is ideal for real-time load testing metrics.
 
-When using `--prometheus-url`, forgy pushes metrics to the specified Push Gateway URL. Metrics are pushed every 10 seconds by default (configurable with `--metrics-frequency`).
+When using `--prometheus-url`, forgy sends metrics to the specified Prometheus Remote Write endpoint. Metrics are sent every 10 seconds by default (configurable with `--metrics-frequency`).
 
 ### Setup
 
-1. **Start Prometheus Push Gateway:**
+1. **Enable Remote Write in Prometheus:**
+   Start Prometheus with the remote write receiver feature flag:
    ```bash
-   docker run -d -p 9091:9091 prom/pushgateway
+   prometheus --enable-feature=remote-write-receiver
    ```
 
-2. **Configure Prometheus to scrape the Push Gateway:**
-   ```yaml
-   # prometheus.yml
-   scrape_configs:
-     - job_name: 'pushgateway'
-       static_configs:
-         - targets: ['localhost:9091']
-   ```
+2. **Verify Remote Write endpoint is available:**
+   The endpoint will be available at `http://localhost:9090/api/v1/write`
 
-3. **Run forgy with push metrics:**
+3. **Run forgy with Remote Write:**
    ```bash
    forgy --url=http://api.example.com \
-     --prometheus-url=http://localhost:9091 \
+     --prometheus-url=http://localhost:9090/api/v1/write \
      --prometheus-label=my-test
    ```
 
@@ -136,31 +131,33 @@ When using `--prometheus-url`, forgy pushes metrics to the specified Push Gatewa
 Use different `--prometheus-label` values to distinguish between different test runs:
 ```bash
 # Frontend test
-forgy --url=http://frontend.example.com --prometheus-label=frontend-test
+forgy --url=http://frontend.example.com \
+  --prometheus-url=http://localhost:9090/api/v1/write \
+  --prometheus-label=frontend-test
 
 # Backend test  
-forgy --url=http://backend.example.com --prometheus-label=backend-test
+forgy --url=http://backend.example.com \
+  --prometheus-url=http://localhost:9090/api/v1/write \
+  --prometheus-label=backend-test
 ```
 
-Each test will push metrics to separate job endpoints:
-- `http://localhost:9091/metrics/job/frontend-test`
-- `http://localhost:9091/metrics/job/backend-test`
+Each test will send metrics with different job labels to the same Remote Write endpoint. The `prometheus-label` value becomes the job name but does not modify the `prometheus-url`.
 
 ### Available Metrics
 
-All metrics are prefixed with `bh_` to distinguish them from other metrics:
+All metrics are prefixed with `forgy_` to distinguish them from other metrics:
 
-- `bh_requests_total` - Total requests by status and method
-- `bh_request_duration_seconds` - Request duration histogram  
-- `bh_active_vus` - Currently active virtual users
-- `bh_target_vus` - Target number of virtual users
-- `bh_success_rate` - Current success rate percentage
-- `bh_requests_per_second` - Current throughput
-- `bh_response_time_p50_ms` - 50th percentile response time
-- `bh_response_time_p90_ms` - 90th percentile response time
-- `bh_response_time_p95_ms` - 95th percentile response time
-- `bh_response_time_p99_ms` - 99th percentile response time
-- `bh_phase` - Current test phase (idle=1, ramp-up=1, hold=1, ramp-down=1)
+- `forgy_requests_total` - Total requests by status and method
+- `forgy_request_duration_seconds` - Request duration histogram  
+- `forgy_active_vus` - Currently active virtual users
+- `forgy_target_vus` - Target number of virtual users
+- `forgy_success_rate` - Current success rate percentage
+- `forgy_requests_per_second` - Current throughput
+- `forgy_response_time_p50_ms` - 50th percentile response time
+- `forgy_response_time_p90_ms` - 90th percentile response time
+- `forgy_response_time_p95_ms` - 95th percentile response time
+- `forgy_response_time_p99_ms` - 99th percentile response time
+- `forgy_phase` - Current test phase (idle=1, ramp-up=1, hold=1, ramp-down=1)
 
 ## License
 
