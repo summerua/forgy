@@ -1,0 +1,74 @@
+[package]
+name = "forgy"
+version = "0.1.0"
+authors = ["Bogdan Protsiuk <bohdan.protsiuk@gmail.com>"]
+edition = "2021"
+description = "High-performance REST API load testing tool with Prometheus metrics"
+documentation = "https://github.com/summerua/forgy"
+homepage = "https://github.com/summerua/forgy"
+repository = "https://github.com/summerua/forgy"
+readme = "README.md"
+keywords = ["load-testing", "performance", "http", "benchmark", "prometheus"]
+categories = ["command-line-utilities", "development-tools", "web-programming::http-client"]
+license = "MIT"
+exclude = [
+    ".github/*",
+    "tests/*",
+]
+
+[[bin]]
+name = "forgy"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
+
+# CLI argument parsing
+clap = { version = "4.4", features = ["derive", "color", "suggestions"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Date and time
+chrono = { version = "0.4", features = ["serde"] }
+humantime = "2.1"
+
+# System info
+num_cpus = "1.16"
+sysinfo = "0.30"
+
+# Synchronization
+parking_lot = "0.12"
+
+# Progress bar
+indicatif = "0.17"
+
+# High Dynamic Range histogram for accurate percentiles
+hdrhistogram = "7.5"
+
+# Prometheus metrics
+prometheus = { version = "0.13", features = ["push"] }
+
+# Lazy static for global metrics
+lazy_static = "1.4"
+
+[profile.release]
+# Optimizations for release builds
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.release-with-debug]
+inherits = "release"
+strip = false
+debug = true
+
+[badges]
+maintenance = { status = "actively-developed" }
