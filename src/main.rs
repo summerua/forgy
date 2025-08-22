@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-// External crate imports (alphabetical)
+// External crate imports
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use hdrhistogram::Histogram;
@@ -16,7 +16,6 @@ use prometheus::{
 };
 use reqwest::{Client, Method};
 use serde::{Deserialize, Serialize};
-// sysinfo import removed - no longer tracking system-wide network stats
 use tokio::time::{interval, sleep};
 
 // Remote write module
@@ -29,6 +28,7 @@ use remote_write::RemoteWriteClient;
 
 lazy_static! {
     static ref REGISTRY: Registry = Registry::new();
+    static ref REMOTE_WRITE_CLIENT: parking_lot::Mutex<Option<RemoteWriteClient>> = parking_lot::Mutex::new(None);
 
     // Request metrics
     static ref REQUEST_COUNTER: IntCounterVec = IntCounterVec::new(
@@ -74,8 +74,6 @@ lazy_static! {
     static ref RESPONSE_TIME_P99: Gauge = Gauge::new(
         "forgy_response_time_p99_ms", "99th percentile response time in milliseconds"
     ).unwrap();
-
-    // Network metrics removed to reduce overhead
 
     // Test phase indicator
     static ref TEST_PHASE: IntGaugeVec = IntGaugeVec::new(
@@ -128,10 +126,6 @@ struct Args {
     #[clap(long, default_value = "30")]
     timeout: u64,
 
-    /// Number of worker threads (defaults to CPU count)
-    #[clap(long)]
-    workers: Option<usize>,
-
     /// Output results to JSON file
     #[clap(long)]
     output: Option<String>,
@@ -140,9 +134,9 @@ struct Args {
     #[clap(long, value_name = "URL")]
     prometheus_url: Option<String>,
 
-    /// Label for grouping metrics in Prometheus (default: forgy)
+    /// Application label for grouping metrics in Prometheus (default: forgy)
     #[clap(long, default_value = "forgy")]
-    prometheus_label: String,
+    app: String,
 
     /// Metrics push frequency in seconds (default: 10)
     #[clap(long, default_value = "10")]
@@ -174,8 +168,6 @@ struct TestResults {
     test_duration_seconds: f64,
     status_code_distribution: HashMap<u16, usize>,
 }
-
-// SystemMonitor removed - using HTTP-level traffic estimation instead
 
 // =============================================================================
 // LOAD TESTER
@@ -337,7 +329,7 @@ impl LoadTester {
     async fn update_and_push_metrics_periodically(
         &self,
         prometheus_url: Option<&str>,
-        prometheus_label: &str,
+        app: &str,
         frequency_secs: u64,
     ) {
         // Use configurable metrics push frequency
@@ -375,7 +367,7 @@ impl LoadTester {
 
             // Push metrics via Remote Write if URL is provided
             if let Some(url) = prometheus_url {
-                if let Err(e) = send_metrics_via_remote_write(url, prometheus_label).await {
+                if let Err(e) = send_metrics_via_remote_write(url, app).await {
                     eprintln!("Failed to send metrics via Remote Write: {}", e);
                 }
             }
@@ -403,7 +395,7 @@ impl LoadTester {
                 "   Prometheus Remote Write: {}",
                 args.prometheus_url.as_ref().unwrap()
             );
-            println!("   Prometheus Label: {}", args.prometheus_label);
+            println!("   App Label: {}", args.app);
         }
         println!();
 
@@ -416,12 +408,12 @@ impl LoadTester {
             let tester_clone = self.clone();
             let frequency = args.metrics_frequency;
             let prometheus_url = args.prometheus_url.clone();
-            let prometheus_label = args.prometheus_label.clone();
+            let app = args.app.clone();
             Some(tokio::spawn(async move {
                 tester_clone
                     .update_and_push_metrics_periodically(
                         prometheus_url.as_deref(),
-                        &prometheus_label,
+                        &app,
                         frequency,
                     )
                     .await;
@@ -562,7 +554,6 @@ impl LoadTester {
         // Calculate results
         self.calculate_results(
             test_start.elapsed().as_secs_f64(),
-            prometheus_enabled,
             args.vus,
         )
     }
@@ -570,7 +561,6 @@ impl LoadTester {
     fn calculate_results(
         &self,
         duration_seconds: f64,
-        _prometheus_enabled: bool,
         vus: usize,
     ) -> TestResults {
         let stats = self.stats.lock();
@@ -627,8 +617,6 @@ impl LoadTester {
             0.0
         };
 
-        // Network metrics removed
-
         TestResults {
             total_requests,
             successful_requests,
@@ -671,10 +659,17 @@ impl Clone for LoadTester {
 
 async fn send_metrics_via_remote_write(
     remote_write_url: &str,
-    job_label: &str,
+    app: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let client = RemoteWriteClient::new(remote_write_url.to_string());
-    client.send_metrics(&REGISTRY, job_label).await
+    // Get or create the singleton client
+    let client = {
+        let mut client_guard = REMOTE_WRITE_CLIENT.lock();
+        if client_guard.is_none() {
+            *client_guard = Some(RemoteWriteClient::new(remote_write_url.to_string()));
+        }
+        client_guard.as_ref().unwrap().clone()
+    };
+    client.send_metrics(&REGISTRY, app).await
 }
 
 fn init_prometheus() {
@@ -768,17 +763,10 @@ fn print_results(results: &TestResults) {
 async fn main() {
     let args = Args::parse();
 
-    // Set worker threads
-    let workers = args.workers.unwrap_or_else(num_cpus::get);
-    println!("Using {} worker threads", workers);
-
     // Initialize Prometheus if URL provided
     if args.prometheus_url.is_some() {
         init_prometheus();
-        println!("Prometheus Remote Write enabled");
     }
-
-    // Network monitoring removed - now using HTTP-level estimation
 
     // Build and run the load tester
     let tester = LoadTester::new(&args);
@@ -802,12 +790,9 @@ async fn main() {
 
     // Push final metrics if Prometheus is enabled
     if let Some(prometheus_url) = &args.prometheus_url {
-        println!("\nSending final metrics via Remote Write...");
-        if let Err(e) = send_metrics_via_remote_write(prometheus_url, &args.prometheus_label).await
+        if let Err(e) = send_metrics_via_remote_write(prometheus_url, &args.app).await
         {
             eprintln!("Failed to push final metrics: {}", e);
-        } else {
-            println!("Final metrics sent successfully");
         }
     }
 }

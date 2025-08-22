@@ -3,6 +3,9 @@
 use prost::Message;
 use reqwest::Client;
 use snap::raw::Encoder;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // Protobuf definitions for Prometheus Remote Write
@@ -95,66 +98,150 @@ pub enum MetricType {
     Stateset = 7,
 }
 
-// Remote Write client
+// Message for the metrics queue
+#[derive(Debug)]
+pub struct MetricsMessage {
+    pub metric_families: Vec<prometheus::proto::MetricFamily>,
+    pub app: String,
+}
+
+// Remote Write client with queue
 pub struct RemoteWriteClient {
     client: Client,
     url: String,
+    metrics_sender: Sender<MetricsMessage>,
+    last_timestamp: Arc<Mutex<i64>>,
+}
+
+impl Clone for RemoteWriteClient {
+    fn clone(&self) -> Self {
+        Self {
+            client: self.client.clone(),
+            url: self.url.clone(),
+            metrics_sender: self.metrics_sender.clone(),
+            last_timestamp: self.last_timestamp.clone(),
+        }
+    }
 }
 
 impl RemoteWriteClient {
     pub fn new(url: String) -> Self {
         let client = Client::new();
-        Self { client, url }
+        let (sender, receiver) = mpsc::channel();
+        let last_timestamp = Arc::new(Mutex::new(0));
+        
+        // Spawn background thread for processing metrics
+        let url_clone = url.clone();
+        let client_clone = client.clone();
+        let timestamp_clone = last_timestamp.clone();
+        
+        thread::spawn(move || {
+            Self::metrics_processor_thread(receiver, client_clone, url_clone, timestamp_clone);
+        });
+        
+        Self { 
+            client, 
+            url,
+            metrics_sender: sender,
+            last_timestamp,
+        }
     }
 
     pub async fn send_metrics(
         &self,
         metrics: &prometheus::Registry,
-        job_label: &str,
+        app: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let metric_families = metrics.gather();
-        let timestamp = Self::current_timestamp()?;
         
+        // Send metrics to the queue for sequential processing
+        let message = MetricsMessage {
+            metric_families,
+            app: app.to_string(),
+        };
+        
+        self.metrics_sender.send(message)
+            .map_err(|e| format!("Failed to send metrics to queue: {}", e))?;
+        
+        Ok(())
+    }
+
+    // Background thread that processes metrics sequentially with monotonic timestamps
+    fn metrics_processor_thread(
+        receiver: Receiver<MetricsMessage>,
+        client: Client,
+        url: String,
+        last_timestamp: Arc<Mutex<i64>>,
+    ) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        
+        while let Ok(message) = receiver.recv() {
+            // Generate monotonic timestamp
+            let timestamp = {
+                let mut last = last_timestamp.lock().unwrap();
+                let current = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as i64;
+                
+                let timestamp = if current <= *last {
+                    *last + 1  // Increment by 1ms if current time is not ahead
+                } else {
+                    current
+                };
+                
+                *last = timestamp;
+                timestamp
+            };
+            
+            // Process metrics with the monotonic timestamp
+            let timeseries = Self::process_metric_families(&message.metric_families, &message.app, timestamp);
+            
+            let write_request = WriteRequest {
+                timeseries,
+                metadata: Vec::new(),
+            };
+            
+            // Send to Prometheus
+            if let Err(e) = rt.block_on(Self::send_write_request_static(&client, &url, write_request)) {
+                eprintln!("Failed to send metrics via Remote Write: {}", e);
+            }
+        }
+    }
+
+    fn process_metric_families(
+        metric_families: &[prometheus::proto::MetricFamily],
+        app: &str,
+        timestamp: i64,
+    ) -> Vec<TimeSeries> {
         let mut timeseries = Vec::new();
         
         for family in metric_families {
             for metric in family.get_metric() {
-                let base_labels = Self::create_base_labels(family.get_name(), job_label, metric);
+                let base_labels = Self::create_base_labels(family.get_name(), app, metric);
                 
                 if metric.has_counter() {
                     timeseries.push(Self::create_counter_timeseries(base_labels, metric, timestamp));
                 } else if metric.has_gauge() {
                     timeseries.push(Self::create_gauge_timeseries(base_labels, metric, timestamp));
                 } else if metric.has_histogram() {
-                    let mut hist_timeseries = Self::create_histogram_timeseries(
+                    let mut hist_timeseries = Self::create_histogram_timeseries_simple(
                         base_labels, 
                         family.get_name(), 
-                        metric, 
+                        metric,
                         timestamp
                     );
                     timeseries.append(&mut hist_timeseries);
                 }
             }
         }
-
-        let write_request = WriteRequest {
-            timeseries,
-            metadata: Vec::new(),
-        };
-
-        self.send_write_request(write_request).await
-    }
-
-    fn current_timestamp() -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_millis() as i64;
-        Ok(timestamp)
+        
+        timeseries
     }
 
     fn create_base_labels(
         metric_name: &str,
-        job_label: &str,
+        app: &str,
         metric: &prometheus::proto::Metric,
     ) -> Vec<Label> {
         let mut labels = vec![
@@ -163,8 +250,8 @@ impl RemoteWriteClient {
                 value: metric_name.to_string(),
             },
             Label {
-                name: "job".to_string(),
-                value: job_label.to_string(),
+                name: "app".to_string(),
+                value: app.to_string(),
             },
         ];
 
@@ -210,7 +297,10 @@ impl RemoteWriteClient {
         }
     }
 
-    fn create_histogram_timeseries(
+
+
+
+    fn create_histogram_timeseries_simple(
         base_labels: Vec<Label>,
         metric_name: &str,
         metric: &prometheus::proto::Metric,
@@ -239,6 +329,7 @@ impl RemoteWriteClient {
 
         let mut count_labels = base_labels.clone();
         count_labels[0].value = format!("{}_count", metric_name);
+        
         timeseries.push(TimeSeries {
             labels: count_labels,
             samples: vec![Sample {
@@ -251,6 +342,7 @@ impl RemoteWriteClient {
 
         let mut sum_labels = base_labels;
         sum_labels[0].value = format!("{}_sum", metric_name);
+        
         timeseries.push(TimeSeries {
             labels: sum_labels,
             samples: vec![Sample {
@@ -264,8 +356,9 @@ impl RemoteWriteClient {
         timeseries
     }
 
-    async fn send_write_request(
-        &self,
+    async fn send_write_request_static(
+        client: &Client,
+        url: &str,
         write_request: WriteRequest,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let encoded = write_request.encode_to_vec();
@@ -274,9 +367,8 @@ impl RemoteWriteClient {
         let compressed = encoder.compress_vec(&encoded)
             .map_err(|e| format!("Failed to compress data: {}", e))?;
 
-        let response = self
-            .client
-            .post(&self.url)
+        let response = client
+            .post(url)
             .header("Content-Type", "application/x-protobuf")
             .header("Content-Encoding", "snappy")
             .header("X-Prometheus-Remote-Write-Version", "0.1.0")
