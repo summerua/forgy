@@ -67,7 +67,7 @@ forgy --url=http://api.example.com/endpoint \
   --hold=10m \
   --ramp-down=1m \
   --prometheus-url=http://localhost:9090/api/v1/write \
-  --prometheus-label=api-test \
+  --app=api-test \
   --metrics-frequency=15
 
 # POST request with custom headers and body
@@ -97,7 +97,7 @@ OPTIONS:
     --workers <COUNT>                Number of worker threads (default: CPU count)
     --output <FILE>                  Save results to JSON file
     --prometheus-url <URL>           Prometheus Remote Write URL (e.g., http://localhost:9090/api/v1/write)
-    --prometheus-label <LABEL>       Label for grouping metrics in Prometheus (default: forgy)
+    --app <LABEL>                    Application label for grouping metrics in Prometheus (default: forgy)
     --metrics-frequency <SECS>       Metrics push frequency in seconds (default: 10)
     --help                           Print help information
 ```
@@ -123,25 +123,25 @@ When using `--prometheus-url`, forgy sends metrics to the specified Prometheus R
    ```bash
    forgy --url=http://api.example.com \
      --prometheus-url=http://localhost:9090/api/v1/write \
-     --prometheus-label=my-test
+     --app=my-test
    ```
 
 ### Multiple Test Runs
 
-Use different `--prometheus-label` values to distinguish between different test runs:
+Use different `--app` values to distinguish between different test runs:
 ```bash
 # Frontend test
 forgy --url=http://frontend.example.com \
   --prometheus-url=http://localhost:9090/api/v1/write \
-  --prometheus-label=frontend-test
+  --app=frontend-test
 
 # Backend test  
 forgy --url=http://backend.example.com \
   --prometheus-url=http://localhost:9090/api/v1/write \
-  --prometheus-label=backend-test
+  --app=backend-test
 ```
 
-Each test will send metrics with different job labels to the same Remote Write endpoint. The `prometheus-label` value becomes the job name but does not modify the `prometheus-url`.
+Each test will send metrics with different job labels to the same Remote Write endpoint. The `app` value becomes the job name but does not modify the `prometheus-url`.
 
 ### Available Metrics
 
