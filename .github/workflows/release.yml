@@ -8,13 +8,8 @@ on:
 jobs:
   build:
     name: Build and Release
-    runs-on: ubuntu-latest
     strategy:
       matrix:
-        target:
-          - x86_64-unknown-linux-gnu
-          - x86_64-apple-darwin
-          - aarch64-apple-darwin
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
@@ -25,6 +20,7 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
             name: forgy-macos-arm64
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout code
@@ -43,21 +39,12 @@ jobs:
           sudo apt-get install -y musl-tools
 
       - name: Build binary
-        run: |
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            cargo build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Create release artifact
         run: |
           mkdir -p release
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            cp target/${{ matrix.target }}/release/forgy release/${{ matrix.name }}
-          else
-            cp target/${{ matrix.target }}/release/forgy release/${{ matrix.name }}
-          fi
+          cp target/${{ matrix.target }}/release/forgy release/${{ matrix.name }}
           chmod +x release/${{ matrix.name }}
 
       - name: Upload artifact
