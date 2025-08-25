@@ -2,13 +2,15 @@
 
 **High-performance REST API load testing tool built in Rust with real-time Prometheus metrics**
 
+> ⚠️ **Early Development Notice**: Forgy is currently in early development and is not recommended for production use. Features may change and stability is not guaranteed. Use at your own risk.
+
 Forgy is a modern load testing tool designed to stress-test REST endpoints with precision and efficiency. Built with Rust for maximum performance, it leverages async I/O and multi-core processing to generate massive concurrent loads while maintaining detailed metrics and observability.
 
 ## Installation
 
 ### Quick Install (Recommended)
 
-Install forgy with a single command:
+Install Forgy with a single command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/summerua/forgy/main/install.sh | bash
