@@ -356,7 +356,7 @@ impl LoadTester {
             // Update percentiles
             {
                 let histogram = self.histogram.lock();
-                if histogram.len() > 0 {
+                if !histogram.is_empty() {
                     // Convert from microseconds to milliseconds for Prometheus metrics
                     RESPONSE_TIME_P50.set(histogram.value_at_percentile(50.0) as f64 / 1000.0);
                     RESPONSE_TIME_P90.set(histogram.value_at_percentile(90.0) as f64 / 1000.0);
@@ -583,22 +583,22 @@ impl LoadTester {
             .unwrap_or(0.0);
 
         // Convert from microseconds back to milliseconds for percentiles
-        let p50_response_time_ms = if histogram.len() > 0 {
+        let p50_response_time_ms = if !histogram.is_empty() {
             histogram.value_at_percentile(50.0) as f64 / 1000.0
         } else {
             0.0
         };
-        let p90_response_time_ms = if histogram.len() > 0 {
+        let p90_response_time_ms = if !histogram.is_empty() {
             histogram.value_at_percentile(90.0) as f64 / 1000.0
         } else {
             0.0
         };
-        let p95_response_time_ms = if histogram.len() > 0 {
+        let p95_response_time_ms = if !histogram.is_empty() {
             histogram.value_at_percentile(95.0) as f64 / 1000.0
         } else {
             0.0
         };
-        let p99_response_time_ms = if histogram.len() > 0 {
+        let p99_response_time_ms = if !histogram.is_empty() {
             histogram.value_at_percentile(99.0) as f64 / 1000.0
         } else {
             0.0
