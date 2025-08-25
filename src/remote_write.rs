@@ -129,18 +129,18 @@ impl RemoteWriteClient {
         let client = Client::new();
         let (sender, receiver) = mpsc::channel();
         let last_timestamp = Arc::new(Mutex::new(0));
-        
+
         // Spawn background thread for processing metrics
         let url_clone = url.clone();
         let client_clone = client.clone();
         let timestamp_clone = last_timestamp.clone();
-        
+
         thread::spawn(move || {
             Self::metrics_processor_thread(receiver, client_clone, url_clone, timestamp_clone);
         });
-        
-        Self { 
-            client, 
+
+        Self {
+            client,
             url,
             metrics_sender: sender,
             last_timestamp,
@@ -153,16 +153,17 @@ impl RemoteWriteClient {
         app: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let metric_families = metrics.gather();
-        
+
         // Send metrics to the queue for sequential processing
         let message = MetricsMessage {
             metric_families,
             app: app.to_string(),
         };
-        
-        self.metrics_sender.send(message)
+
+        self.metrics_sender
+            .send(message)
             .map_err(|e| format!("Failed to send metrics to queue: {}", e))?;
-        
+
         Ok(())
     }
 
@@ -174,7 +175,7 @@ impl RemoteWriteClient {
         last_timestamp: Arc<Mutex<i64>>,
     ) {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        
+
         while let Ok(message) = receiver.recv() {
             // Generate monotonic timestamp
             let timestamp = {
@@ -183,27 +184,32 @@ impl RemoteWriteClient {
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_millis() as i64;
-                
+
                 let timestamp = if current <= *last {
-                    *last + 1  // Increment by 1ms if current time is not ahead
+                    *last + 1 // Increment by 1ms if current time is not ahead
                 } else {
                     current
                 };
-                
+
                 *last = timestamp;
                 timestamp
             };
-            
+
             // Process metrics with the monotonic timestamp
-            let timeseries = Self::process_metric_families(&message.metric_families, &message.app, timestamp);
-            
+            let timeseries =
+                Self::process_metric_families(&message.metric_families, &message.app, timestamp);
+
             let write_request = WriteRequest {
                 timeseries,
                 metadata: Vec::new(),
             };
-            
+
             // Send to Prometheus
-            if let Err(e) = rt.block_on(Self::send_write_request_static(&client, &url, write_request)) {
+            if let Err(e) = rt.block_on(Self::send_write_request_static(
+                &client,
+                &url,
+                write_request,
+            )) {
                 eprintln!("Failed to send metrics via Remote Write: {}", e);
             }
         }
@@ -215,27 +221,35 @@ impl RemoteWriteClient {
         timestamp: i64,
     ) -> Vec<TimeSeries> {
         let mut timeseries = Vec::new();
-        
+
         for family in metric_families {
             for metric in family.get_metric() {
                 let base_labels = Self::create_base_labels(family.get_name(), app, metric);
-                
+
                 if metric.has_counter() {
-                    timeseries.push(Self::create_counter_timeseries(base_labels, metric, timestamp));
+                    timeseries.push(Self::create_counter_timeseries(
+                        base_labels,
+                        metric,
+                        timestamp,
+                    ));
                 } else if metric.has_gauge() {
-                    timeseries.push(Self::create_gauge_timeseries(base_labels, metric, timestamp));
+                    timeseries.push(Self::create_gauge_timeseries(
+                        base_labels,
+                        metric,
+                        timestamp,
+                    ));
                 } else if metric.has_histogram() {
                     let mut hist_timeseries = Self::create_histogram_timeseries_simple(
-                        base_labels, 
-                        family.get_name(), 
+                        base_labels,
+                        family.get_name(),
                         metric,
-                        timestamp
+                        timestamp,
                     );
                     timeseries.append(&mut hist_timeseries);
                 }
             }
         }
-        
+
         timeseries
     }
 
@@ -297,9 +311,6 @@ impl RemoteWriteClient {
         }
     }
 
-
-
-
     fn create_histogram_timeseries_simple(
         base_labels: Vec<Label>,
         metric_name: &str,
@@ -329,7 +340,7 @@ impl RemoteWriteClient {
 
         let mut count_labels = base_labels.clone();
         count_labels[0].value = format!("{}_count", metric_name);
-        
+
         timeseries.push(TimeSeries {
             labels: count_labels,
             samples: vec![Sample {
@@ -342,7 +353,7 @@ impl RemoteWriteClient {
 
         let mut sum_labels = base_labels;
         sum_labels[0].value = format!("{}_sum", metric_name);
-        
+
         timeseries.push(TimeSeries {
             labels: sum_labels,
             samples: vec![Sample {
@@ -362,9 +373,10 @@ impl RemoteWriteClient {
         write_request: WriteRequest,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let encoded = write_request.encode_to_vec();
-        
+
         let mut encoder = Encoder::new();
-        let compressed = encoder.compress_vec(&encoded)
+        let compressed = encoder
+            .compress_vec(&encoded)
             .map_err(|e| format!("Failed to compress data: {}", e))?;
 
         let response = client
@@ -380,11 +392,7 @@ impl RemoteWriteClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(format!(
-                "Remote write failed with status {}: {}", 
-                status, 
-                body
-            ).into());
+            return Err(format!("Remote write failed with status {}: {}", status, body).into());
         }
 
         Ok(())

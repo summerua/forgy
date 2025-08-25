@@ -552,17 +552,10 @@ impl LoadTester {
         }
 
         // Calculate results
-        self.calculate_results(
-            test_start.elapsed().as_secs_f64(),
-            args.vus,
-        )
+        self.calculate_results(test_start.elapsed().as_secs_f64(), args.vus)
     }
 
-    fn calculate_results(
-        &self,
-        duration_seconds: f64,
-        vus: usize,
-    ) -> TestResults {
+    fn calculate_results(&self, duration_seconds: f64, vus: usize) -> TestResults {
         let stats = self.stats.lock();
         let histogram = self.histogram.lock();
         let status_codes = self.status_codes.lock().clone();
@@ -790,8 +783,7 @@ async fn main() {
 
     // Push final metrics if Prometheus is enabled
     if let Some(prometheus_url) = &args.prometheus_url {
-        if let Err(e) = send_metrics_via_remote_write(prometheus_url, &args.app).await
-        {
+        if let Err(e) = send_metrics_via_remote_write(prometheus_url, &args.app).await {
             eprintln!("Failed to push final metrics: {}", e);
         }
     }
