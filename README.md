@@ -6,52 +6,69 @@ forgy is a modern load testing tool designed to stress-test REST endpoints with 
 
 ## Installation
 
-### Prerequisites
+### Quick Install (Recommended)
 
-- Rust 1.70 or higher
-- Cargo (comes with Rust)
+Install forgy with a single command:
 
-Install Rust from [https://rustup.rs/](https://rustup.rs/) if you haven't already:
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+curl -fsSL https://raw.githubusercontent.com/summerua/forgy/main/install.sh | bash
+```
+
+This will:
+- Detect your platform (Linux/macOS, x86_64/ARM64)
+- Download the latest release binary
+- Install it to `~/.local/bin/forgy`
+- Make it executable
+
+After installation, you may need to add `~/.local/bin` to your PATH:
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+```
+
+### Manual Download
+
+Download pre-built binaries from [GitHub Releases](https://github.com/summerua/forgy/releases):
+
+- **Linux (x86_64)**: `forgy-linux-x86_64`
+- **macOS (x86_64)**: `forgy-macos-x86_64`  
+- **macOS (ARM64)**: `forgy-macos-arm64`
+
+```bash
+# Example for Linux
+wget https://github.com/summerua/forgy/releases/latest/download/forgy-linux-x86_64
+chmod +x forgy-linux-x86_64
+sudo mv forgy-linux-x86_64 /usr/local/bin/forgy
 ```
 
 ### Build from Source
 
+If you prefer to build from source:
+
+#### Prerequisites
+- Rust 1.70 or higher
+- Cargo (comes with Rust)
+
+Install Rust from [https://rustup.rs/](https://rustup.rs/):
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+#### Build Steps
 1. Clone the repository:
 ```bash
 git clone https://github.com/summerua/forgy.git
 cd forgy
 ```
 
-2. Build the project:
+2. Build and install:
 ```bash
-# Development build
-cargo build
-
-# Optimized release build (recommended for load testing)
-cargo build --release
-```
-
-3. Run the binary:
-```bash
-# Development build
-./target/debug/forgy --help
-
-# Release build
-./target/release/forgy --help
-```
-
-### Install Locally
-
-Install the binary to your Cargo bin directory (usually `~/.cargo/bin/`):
-```bash
+# Install directly to cargo bin
 cargo install --path .
-```
 
-Then run from anywhere:
-```bash
-forgy --help
+# Or build manually
+cargo build --release
+./target/release/forgy --help
 ```
 
 ## Quick Start
