@@ -9,8 +9,20 @@ permissions:
   contents: write
 
 jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          release-type: rust
+
   build:
-    name: Build and Release
+    name: Build Release Assets
+    needs: release
+    if: ${{ needs.release.outputs.release_created }}
     strategy:
       matrix:
         include:
@@ -50,33 +62,8 @@ jobs:
           cp target/${{ matrix.target }}/release/forgy release/${{ matrix.name }}
           chmod +x release/${{ matrix.name }}
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.name }}
-          path: release/${{ matrix.name }}
-
-  create-release:
-    name: Create Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./artifacts
-
-
-      - name: Create release
+      - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            artifacts/forgy-linux-x86_64/forgy-linux-x86_64
-            artifacts/forgy-macos-x86_64/forgy-macos-x86_64
-            artifacts/forgy-macos-arm64/forgy-macos-arm64
-          generate_release_notes: true
-          draft: false
-          prerelease: false
+          files: release/${{ matrix.name }}
+          tag_name: ${{ github.ref_name }}
