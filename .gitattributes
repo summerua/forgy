@@ -1,0 +1,6 @@
+# Exclude directories from GitHub release archives
+target/ export-ignore
+tests/ export-ignore
+.github/ export-ignore
+*.log export-ignore
+.env export-ignore
