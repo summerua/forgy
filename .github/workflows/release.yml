@@ -63,6 +63,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history and tags
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -73,20 +75,32 @@ jobs:
         run: |
           # Get current and previous tag
           CURRENT_TAG="${GITHUB_REF#refs/tags/}"
-          PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -v "^${CURRENT_TAG}$" | head -n1)
+          echo "Current tag: $CURRENT_TAG"
           
-          # If no previous tag exists, use first commit
+          # List all tags for debugging
+          echo "Available tags:"
+          git tag --sort=-version:refname
+          
+          PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -v "^${CURRENT_TAG}$" | head -n1)
+          echo "Previous tag: $PREVIOUS_TAG"
+          
+          # Generate changelog
+          echo "## What's Changed" > release_notes.md
+          echo "" >> release_notes.md
+          
+          # If no previous tag exists or it's empty, show initial release message
           if [ -z "$PREVIOUS_TAG" ]; then
-            PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
-            echo "## What's Changed" > release_notes.md
-            echo "" >> release_notes.md
+            echo "No previous tag found - showing initial release message"
             echo "Initial release of Forgy! 🎉" >> release_notes.md
           else
-            echo "## What's Changed" > release_notes.md
-            echo "" >> release_notes.md
-            
+            echo "Generating changelog from $PREVIOUS_TAG to $CURRENT_TAG"
             # Add commit messages since last tag
-            git log --oneline --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD" >> release_notes.md
+            if git log --oneline --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD" | head -1 > /dev/null 2>&1; then
+              git log --oneline --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD" >> release_notes.md
+            else
+              echo "No commits found between $PREVIOUS_TAG and $CURRENT_TAG"
+              echo "- Minor updates and improvements" >> release_notes.md
+            fi
           fi
           
           echo "" >> release_notes.md
