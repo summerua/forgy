@@ -17,6 +17,9 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             name: forgy-linux-x86_64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: forgy-linux-arm64
           - target: x86_64-apple-darwin
             os: macos-latest
             name: forgy-macos-x86_64
@@ -40,6 +43,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
+
+      - name: Install ARM64 cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Build binary
         run: cargo build --release --target ${{ matrix.target }}
@@ -94,6 +103,7 @@ jobs:
           echo "" >> release_notes.md
           echo "### Manual Download" >> release_notes.md
           echo "- **Linux (x86_64)**: \`forgy-linux-x86_64\`" >> release_notes.md
+          echo "- **Linux (ARM64)**: \`forgy-linux-arm64\`" >> release_notes.md
           echo "- **macOS (x86_64)**: \`forgy-macos-x86_64\`" >> release_notes.md  
           echo "- **macOS (ARM64)**: \`forgy-macos-arm64\`" >> release_notes.md
 
@@ -102,6 +112,7 @@ jobs:
         with:
           files: |
             artifacts/forgy-linux-x86_64/forgy-linux-x86_64
+            artifacts/forgy-linux-arm64/forgy-linux-arm64
             artifacts/forgy-macos-x86_64/forgy-macos-x86_64
             artifacts/forgy-macos-arm64/forgy-macos-arm64
           body_path: release_notes.md
