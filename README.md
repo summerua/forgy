@@ -4,73 +4,20 @@
 
 > ⚠️ **Early Development Notice**: Forgy is currently in early development and is not recommended for production use. Features may change and stability is not guaranteed. Use at your own risk.
 
-Forgy is a modern load testing tool designed to stress-test REST endpoints with precision and efficiency. Built with Rust for maximum performance, it leverages async I/O and multi-core processing to generate massive concurrent loads while maintaining detailed metrics and observability.
-
 ## Installation
-
-### Quick Install (Recommended)
-
-Install Forgy with a single command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/summerua/forgy/main/install.sh | bash
 ```
 
-This will:
-- Detect your platform (Linux/macOS, x86_64/ARM64)
-- Download the latest release binary
-- Install it to `~/.local/bin/forgy`
-- Make it executable
-
-After installation, you may need to add `~/.local/bin` to your PATH:
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-```
-
-### Manual Download
-
-Download pre-built binaries from [GitHub Releases](https://github.com/summerua/forgy/releases):
-
-- **Linux (x86_64)**: `forgy-linux-x86_64`
-- **macOS (x86_64)**: `forgy-macos-x86_64`  
-- **macOS (ARM64)**: `forgy-macos-arm64`
-
-```bash
-# Example for Linux
-wget https://github.com/summerua/forgy/releases/latest/download/forgy-linux-x86_64
-chmod +x forgy-linux-x86_64
-sudo mv forgy-linux-x86_64 /usr/local/bin/forgy
-```
+Or download pre-built binaries from [GitHub Releases](https://github.com/summerua/forgy/releases).
 
 ### Build from Source
 
-If you prefer to build from source:
-
-#### Prerequisites
-- Rust 1.70 or higher
-- Cargo (comes with Rust)
-
-Install Rust from [https://rustup.rs/](https://rustup.rs/):
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-#### Build Steps
-1. Clone the repository:
 ```bash
 git clone https://github.com/summerua/forgy.git
 cd forgy
-```
-
-2. Build and install:
-```bash
-# Install directly to cargo bin
 cargo install --path .
-
-# Or build manually
-cargo build --release
-./target/release/forgy --help
 ```
 
 ## Quick Start
@@ -123,7 +70,7 @@ OPTIONS:
 
 ## Prometheus Integration
 
-forgy supports **Remote Write** to send metrics directly to Prometheus, which is ideal for real-time load testing metrics.
+Forgy supports **Remote Write** to send metrics directly to Prometheus, which is ideal for real-time load testing metrics.
 
 When using `--prometheus-url`, forgy sends metrics to the specified Prometheus Remote Write endpoint. Metrics are sent every 10 seconds by default (configurable with `--metrics-frequency`).
 
