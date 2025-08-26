@@ -71,18 +71,23 @@ jobs:
 
       - name: Generate release notes
         run: |
-          # Get the previous tag for changelog
-          PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -v "^${{ github.ref_name }}$" | head -n1)
+          # Get current and previous tag
+          CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+          PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -v "^${CURRENT_TAG}$" | head -n1)
+          
+          # If no previous tag exists, use first commit
           if [ -z "$PREVIOUS_TAG" ]; then
             PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
+            echo "## What's Changed" > release_notes.md
+            echo "" >> release_notes.md
+            echo "Initial release of Forgy! 🎉" >> release_notes.md
+          else
+            echo "## What's Changed" > release_notes.md
+            echo "" >> release_notes.md
+            
+            # Add commit messages since last tag
+            git log --oneline --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD" >> release_notes.md
           fi
-          
-          # Generate changelog
-          echo "## What's Changed" > release_notes.md
-          echo "" >> release_notes.md
-          
-          # Add commit messages since last tag
-          git log --oneline --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD" >> release_notes.md
           
           echo "" >> release_notes.md
           echo "## Installation" >> release_notes.md
