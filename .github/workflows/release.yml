@@ -15,10 +15,10 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-22.04
+            os: ubuntu-latest
             name: forgy-linux-x86_64
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04
+            os: ubuntu-latest
             name: forgy-linux-arm64
           - target: x86_64-apple-darwin
             os: macos-latest
@@ -49,7 +49,7 @@ jobs:
         run: |
           sudo dpkg --add-architecture arm64
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu libssl-dev:arm64 pkg-config
+          sudo apt-get install -y gcc-aarch64-linux-gnu pkg-config-aarch64-linux-gnu libssl-dev:arm64 zlib1g-dev:arm64
 
       - name: Build binary
         run: cargo build --release --target ${{ matrix.target }}
