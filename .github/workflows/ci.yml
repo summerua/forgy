@@ -38,41 +38,38 @@ jobs:
         run: cargo test --verbose
 
   build:
-    name: Build
+    name: Build - ${{ matrix.platform.os-name }}
     strategy:
       matrix:
-        include:
-          - os: ubuntu-latest
+        platform:
+          - os-name: Linux-x86_64
+            runs-on: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          - os: ubuntu-latest
+          - os-name: Linux-aarch64
+            runs-on: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-    runs-on: ${{ matrix.os }}
+          - os-name: macOS-x86_64
+            runs-on: macos-latest
+            target: x86_64-apple-darwin
+          - os-name: macOS-aarch64
+            runs-on: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.platform.runs-on }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-          target: ${{ matrix.target }}
-
-      - name: Install cross-compilation tools
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-
       - name: Build binary
-        run: cargo build --release --target ${{ matrix.target }}
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'aarch64-linux-gnu-gcc' || '' }}
-          OPENSSL_STATIC: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '1' || '' }}
-          OPENSSL_NO_PKG_CONFIG: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '1' || '' }}
-          OPENSSL_DIR: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '/usr' || '' }}
+        uses: houseabsolute/actions-rust-cross@v0
+        with:
+          command: build
+          target: ${{ matrix.platform.target }}
+          args: --locked --release
+          strip: true
 
       - name: Test binary execution
         run: |
-          if [ "${{ matrix.target }}" != "aarch64-unknown-linux-gnu" ]; then
-            ./target/${{ matrix.target }}/release/forgy --help
+          # Only test native builds (not cross-compiled)
+          if [ "${{ matrix.platform.target }}" = "x86_64-unknown-linux-gnu" ] || [ "${{ matrix.platform.target }}" = "aarch64-apple-darwin" ]; then
+            ./target/${{ matrix.platform.target }}/release/forgy --help
           fi

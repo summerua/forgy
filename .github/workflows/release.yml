@@ -10,65 +10,51 @@ permissions:
 
 jobs:
   build:
-    name: Build and Release
+    name: Build and Release - ${{ matrix.platform.os-name }}
     strategy:
       matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+        platform:
+          - os-name: Linux-x86_64
+            runs-on: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
             name: forgy-linux-x86_64
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04
+          - os-name: Linux-aarch64
+            runs-on: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
             name: forgy-linux-arm64
-          - target: x86_64-apple-darwin
-            os: macos-latest
+          - os-name: macOS-x86_64
+            runs-on: macos-latest
+            target: x86_64-apple-darwin
             name: forgy-macos-x86_64
-          - target: aarch64-apple-darwin
-            os: macos-latest
+          - os-name: macOS-aarch64
+            runs-on: macos-latest
+            target: aarch64-apple-darwin
             name: forgy-macos-arm64
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.platform.runs-on }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-          target: ${{ matrix.target }}
-
-      - name: Install cross-compilation tools
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
-
-      - name: Install ARM64 cross-compilation tools
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-
       - name: Build binary
-        run: cargo build --release --target ${{ matrix.target }}
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'aarch64-linux-gnu-gcc' || '' }}
-          OPENSSL_STATIC: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '1' || '' }}
-          OPENSSL_NO_PKG_CONFIG: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '1' || '' }}
-          OPENSSL_DIR: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '/usr' || '' }}
+        uses: houseabsolute/actions-rust-cross@v0
+        with:
+          command: build
+          target: ${{ matrix.platform.target }}
+          args: --locked --release
+          strip: true
 
       - name: Create release artifact
         run: |
           mkdir -p release
-          cp target/${{ matrix.target }}/release/forgy release/${{ matrix.name }}
-          chmod +x release/${{ matrix.name }}
+          cp target/${{ matrix.platform.target }}/release/forgy release/${{ matrix.platform.name }}
+          chmod +x release/${{ matrix.platform.name }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}
-          path: release/${{ matrix.name }}
+          name: ${{ matrix.platform.name }}
+          path: release/${{ matrix.platform.name }}
 
   create-release:
     name: Create Release
