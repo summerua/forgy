@@ -52,7 +52,7 @@ indicatif = "0.17"
 hdrhistogram = "7.5"
 
 # Prometheus metrics
-prometheus = { version = "0.13", features = ["push"] }
+prometheus = { version = "0.13", features = ["push"], default-features = false }
 
 # Prometheus remote write
 prost = "0.11"
