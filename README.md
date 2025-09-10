@@ -113,17 +113,28 @@ Each test will send metrics with different job labels to the same Remote Write e
 
 All metrics are prefixed with `forgy_` to distinguish them from other metrics:
 
+#### Request Metrics
 - `forgy_requests_total` - Total requests by status and method
 - `forgy_request_duration_seconds` - Request duration histogram  
-- `forgy_active_vus` - Currently active virtual users
-- `forgy_target_vus` - Target number of virtual users
 - `forgy_success_rate` - Current success rate percentage
 - `forgy_requests_per_second` - Current throughput
+
+#### Performance Metrics
 - `forgy_response_time_p50_ms` - 50th percentile response time
 - `forgy_response_time_p90_ms` - 90th percentile response time
 - `forgy_response_time_p95_ms` - 95th percentile response time
 - `forgy_response_time_p99_ms` - 99th percentile response time
+
+#### Virtual User Metrics
+- `forgy_active_vus` - Currently active virtual users
+- `forgy_target_vus` - Target number of virtual users
 - `forgy_phase` - Current test phase (idle=1, ramp-up=1, hold=1, ramp-down=1)
+
+#### Network Transfer Metrics
+- `forgy_data_sent` - Total bytes sent in HTTP requests (labeled by method)
+- `forgy_data_received` - Total bytes received in HTTP responses (labeled by method and status_class)
+
+These network metrics help you monitor bandwidth usage and understand the data transfer patterns of your load tests. The output also includes network transfer statistics in the Load Test Results showing total data sent/received and averages per request.
 
 ## License
 

@@ -80,6 +80,17 @@ lazy_static! {
         Opts::new("forgy_phase", "Current test phase (0=idle, 1=rampup, 2=hold, 3=rampdown)"),
         &["phase"]
     ).unwrap();
+
+    // Data transfer metrics
+    static ref DATA_SENT: IntCounterVec = IntCounterVec::new(
+        Opts::new("forgy_data_sent", "Total number of bytes sent in HTTP requests"),
+        &["method"]
+    ).unwrap();
+
+    static ref DATA_RECEIVED: IntCounterVec = IntCounterVec::new(
+        Opts::new("forgy_data_received", "Total number of bytes received in HTTP responses"),
+        &["method", "status_class"]
+    ).unwrap();
 }
 
 // =============================================================================
@@ -167,6 +178,8 @@ struct TestResults {
     requests_per_second: f64,
     test_duration_seconds: f64,
     status_code_distribution: HashMap<u16, usize>,
+    total_bytes_sent: u64,
+    total_bytes_received: u64,
 }
 
 // =============================================================================
@@ -184,6 +197,8 @@ struct LoadTester {
     status_codes: Arc<Mutex<HashMap<u16, usize>>>,
     total_requests: Arc<Mutex<usize>>,
     successful_requests: Arc<Mutex<usize>>,
+    total_bytes_sent: Arc<Mutex<u64>>,
+    total_bytes_received: Arc<Mutex<u64>>,
 }
 
 impl LoadTester {
@@ -220,6 +235,8 @@ impl LoadTester {
             status_codes: Arc::new(Mutex::new(HashMap::new())),
             total_requests: Arc::new(Mutex::new(0)),
             successful_requests: Arc::new(Mutex::new(0)),
+            total_bytes_sent: Arc::new(Mutex::new(0)),
+            total_bytes_received: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -229,21 +246,42 @@ impl LoadTester {
 
         let mut request = self.client.request(self.method.clone(), &self.url);
 
+        // Calculate bytes sent
+        let mut bytes_sent = 0u64;
+
+        // Calculate request body size
         if let Some(body) = &self.body {
+            bytes_sent += body.len() as u64;
             request = request.body(body.clone());
         }
+
+        // Estimate header size (HTTP method + URL + common headers)
+        bytes_sent += self.method.as_str().len() as u64; // HTTP method
+        bytes_sent += self.url.len() as u64; // URL
+        bytes_sent += 150; // Estimate for HTTP headers (Host, User-Agent, Accept, etc.)
 
         let result = request.send().await;
         let duration = start.elapsed();
         let duration_ms = duration.as_secs_f64() * 1000.0;
         let duration_secs = duration.as_secs_f64();
 
-        let (success, status_code) = match result {
+        let (success, status_code, bytes_received) = match result {
             Ok(response) => {
                 let code = response.status().as_u16();
-                (response.status().is_success(), code)
+                let is_success = response.status().is_success();
+                let mut received_bytes = 0u64;
+
+                // Get response body size
+                if let Ok(body) = response.text().await {
+                    received_bytes += body.len() as u64;
+                }
+
+                // Estimate response headers size
+                received_bytes += 200; // Estimate for response headers (Status line, Content-Type, etc.)
+
+                (is_success, code, received_bytes)
             }
-            Err(_) => (false, 0),
+            Err(_) => (false, 0, 0),
         };
 
         // Update Prometheus metrics only if enabled
@@ -264,6 +302,15 @@ impl LoadTester {
             REQUEST_DURATION
                 .with_label_values(&[method_str, status_class])
                 .observe(duration_secs);
+
+            // Update data transfer metrics
+            DATA_SENT
+                .with_label_values(&[method_str])
+                .inc_by(bytes_sent);
+
+            DATA_RECEIVED
+                .with_label_values(&[method_str, status_class])
+                .inc_by(bytes_received);
         }
 
         // Update local metrics (record duration in microseconds for better precision)
@@ -274,6 +321,10 @@ impl LoadTester {
         if success {
             *self.successful_requests.lock() += 1;
         }
+
+        // Update local byte counters
+        *self.total_bytes_sent.lock() += bytes_sent;
+        *self.total_bytes_received.lock() += bytes_received;
 
         RequestStats {
             success,
@@ -610,6 +661,9 @@ impl LoadTester {
             0.0
         };
 
+        let total_bytes_sent = *self.total_bytes_sent.lock();
+        let total_bytes_received = *self.total_bytes_received.lock();
+
         TestResults {
             total_requests,
             successful_requests,
@@ -625,6 +679,8 @@ impl LoadTester {
             requests_per_second,
             test_duration_seconds: duration_seconds,
             status_code_distribution: status_codes,
+            total_bytes_sent,
+            total_bytes_received,
         }
     }
 }
@@ -642,6 +698,8 @@ impl Clone for LoadTester {
             status_codes: self.status_codes.clone(),
             total_requests: self.total_requests.clone(),
             successful_requests: self.successful_requests.clone(),
+            total_bytes_sent: self.total_bytes_sent.clone(),
+            total_bytes_received: self.total_bytes_received.clone(),
         }
     }
 }
@@ -692,6 +750,12 @@ fn init_prometheus() {
         .register(Box::new(RESPONSE_TIME_P99.clone()))
         .unwrap();
     REGISTRY.register(Box::new(TEST_PHASE.clone())).unwrap();
+    REGISTRY
+        .register(Box::new(DATA_SENT.clone()))
+        .unwrap();
+    REGISTRY
+        .register(Box::new(DATA_RECEIVED.clone()))
+        .unwrap();
 
     // Initialize test phase
     TEST_PHASE.with_label_values(&["idle"]).set(1);
@@ -703,6 +767,29 @@ fn init_prometheus() {
 // =============================================================================
 // OUTPUT FUNCTIONS
 // =============================================================================
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+    const THRESHOLD: f64 = 1024.0;
+
+    if bytes == 0 {
+        return "0 B".to_string();
+    }
+
+    let bytes_f = bytes as f64;
+    let unit_index = (bytes_f.log10() / THRESHOLD.log10()).floor() as usize;
+    let unit_index = unit_index.min(UNITS.len() - 1);
+    
+    let size = bytes_f / THRESHOLD.powi(unit_index as i32);
+    
+    if size >= 100.0 {
+        format!("{:.0} {}", size, UNITS[unit_index])
+    } else if size >= 10.0 {
+        format!("{:.1} {}", size, UNITS[unit_index])
+    } else {
+        format!("{:.2} {}", size, UNITS[unit_index])
+    }
+}
 
 fn print_results(results: &TestResults) {
     println!("\n\nLoad Test Results");
@@ -734,6 +821,16 @@ fn print_results(results: &TestResults) {
     println!("P90:                   {:.2}", results.p90_response_time_ms);
     println!("P95:                   {:.2}", results.p95_response_time_ms);
     println!("P99:                   {:.2}", results.p99_response_time_ms);
+
+    println!("\nNetwork Transfer");
+    println!("───────────────────────────────────────");
+    println!("Total Data Sent:       {}", format_bytes(results.total_bytes_sent));
+    println!("Total Data Received:   {}", format_bytes(results.total_bytes_received));
+    println!("Total Data Transfer:   {}", format_bytes(results.total_bytes_sent + results.total_bytes_received));
+    if results.total_requests > 0 {
+        println!("Avg Sent per Request:  {}", format_bytes(results.total_bytes_sent / results.total_requests as u64));
+        println!("Avg Received per Req:  {}", format_bytes(results.total_bytes_received / results.total_requests as u64));
+    }
 
     if !results.status_code_distribution.is_empty() {
         println!("\nStatus Code Distribution");
