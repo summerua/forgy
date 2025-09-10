@@ -750,12 +750,8 @@ fn init_prometheus() {
         .register(Box::new(RESPONSE_TIME_P99.clone()))
         .unwrap();
     REGISTRY.register(Box::new(TEST_PHASE.clone())).unwrap();
-    REGISTRY
-        .register(Box::new(DATA_SENT.clone()))
-        .unwrap();
-    REGISTRY
-        .register(Box::new(DATA_RECEIVED.clone()))
-        .unwrap();
+    REGISTRY.register(Box::new(DATA_SENT.clone())).unwrap();
+    REGISTRY.register(Box::new(DATA_RECEIVED.clone())).unwrap();
 
     // Initialize test phase
     TEST_PHASE.with_label_values(&["idle"]).set(1);
@@ -779,9 +775,9 @@ fn format_bytes(bytes: u64) -> String {
     let bytes_f = bytes as f64;
     let unit_index = (bytes_f.log10() / THRESHOLD.log10()).floor() as usize;
     let unit_index = unit_index.min(UNITS.len() - 1);
-    
+
     let size = bytes_f / THRESHOLD.powi(unit_index as i32);
-    
+
     if size >= 100.0 {
         format!("{:.0} {}", size, UNITS[unit_index])
     } else if size >= 10.0 {
@@ -824,12 +820,27 @@ fn print_results(results: &TestResults) {
 
     println!("\nNetwork Transfer");
     println!("───────────────────────────────────────");
-    println!("Total Data Sent:       {}", format_bytes(results.total_bytes_sent));
-    println!("Total Data Received:   {}", format_bytes(results.total_bytes_received));
-    println!("Total Data Transfer:   {}", format_bytes(results.total_bytes_sent + results.total_bytes_received));
+    println!(
+        "Total Data Sent:       {}",
+        format_bytes(results.total_bytes_sent)
+    );
+    println!(
+        "Total Data Received:   {}",
+        format_bytes(results.total_bytes_received)
+    );
+    println!(
+        "Total Data Transfer:   {}",
+        format_bytes(results.total_bytes_sent + results.total_bytes_received)
+    );
     if results.total_requests > 0 {
-        println!("Avg Sent per Request:  {}", format_bytes(results.total_bytes_sent / results.total_requests as u64));
-        println!("Avg Received per Req:  {}", format_bytes(results.total_bytes_received / results.total_requests as u64));
+        println!(
+            "Avg Sent per Request:  {}",
+            format_bytes(results.total_bytes_sent / results.total_requests as u64)
+        );
+        println!(
+            "Avg Received per Req:  {}",
+            format_bytes(results.total_bytes_received / results.total_requests as u64)
+        );
     }
 
     if !results.status_code_distribution.is_empty() {
